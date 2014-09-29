@@ -8,12 +8,39 @@ class LinearSystem(System):
 		self.equations = equations
 
 	def __str__(self):
-		string = ''
+		eqsStr = []
 
+		greaterEqualSignPos = 0
 		for eq in self.equations:
-			string += str(eq)+'\n'
+			eqStr = str(eq)
 
-		return string
+			equalSignPos = eqStr.find('=')
+			if equalSignPos > greaterEqualSignPos:
+				greaterEqualSignPos = equalSignPos
+
+			eqsStr.append(eqStr)
+
+		# Sexy printing
+		i = 0
+		for eqStr in eqsStr:
+			equalSignPos = eqStr.find('=')
+			eqStr = ' '*(greaterEqualSignPos - equalSignPos) + eqStr
+			eqsStr[i] = eqStr
+			i += 1
+
+		return '\n'.join(eqsStr)
+
+	def __len__(self):
+		return len(self.equations)
+
+	def __iter__(self):
+		return iter(self.equations)
+
+	def __getitem__(self, key):
+		return self.equations[key]
+
+	def __reversed__(self):
+		return LinearSystem(reversed(self.equations))
 
 	def pivot(self):
 		allNull = True
@@ -30,6 +57,8 @@ class LinearSystem(System):
 		pivotEq = None
 		for eq in self.equations:
 			for letter in eq:
+				if not letter: continue
+
 				coeff = eq[letter]
 
 				if pivotCoeff is None or abs(coeff) < abs(pivotCoeff):
@@ -50,13 +79,32 @@ class LinearSystem(System):
 			eqPivotEq = pivotEq * eqPivotCoeff
 
 			eqs.append(eqPivotEq - eq)
-		
+
 		if len(eqs) > 1:
 			subsys = LinearSystem(eqs)
 			eqs = subsys.pivot().equations
 		eqs.insert(0, pivotEq)
 
 		return LinearSystem(eqs)
+
+	def solve(self):
+		reducedSys = reversed(self.pivot())
+
+		found = {}
+		for eq in reducedSys:
+			result = eq.solve(found)
+
+			if result == False:
+				return False
+			elif isinstance(result, dict):
+				for letter in result:
+					if letter in found:
+						if found[letter] != result[letter]:
+							return False
+					else:
+						found[letter] = result[letter]
+
+		return found
 
 class Equation:
 	pass
@@ -65,11 +113,77 @@ class LinearEquation(Equation):
 	def __init__(self, data):
 		self.data = {}
 
+		if isinstance(data, dict):
+			self.fromCoeff(data)
+		elif isinstance(data, str):
+			self.fromStr(data)
+
+	def fromCoeff(self, data):
+		self.data = {}
+
 		for letter in data:
 			coeff = data[letter]
 			if coeff == 0:
 				continue
 			self.data[letter] = coeff
+
+	def fromStr(self, string):
+		eqData = { '': 0 }
+
+		coeff = ''
+		is2ndMember = False
+
+		def coeffToInt(coeff):
+			if coeff in ['+', '-']:
+				coeff += '1'
+
+			if coeff == '':
+				coeff = 1
+			else:
+				coeff = int(coeff)
+
+			if is2ndMember:
+				coeff = -coeff
+			return coeff
+
+		for char in string:
+			if char.isdigit():
+				coeff += char
+			elif char in ['+', '-']:
+				coeff = char
+			elif char == '=':
+				if coeff:
+					eqData[''] = coeffToInt(coeff)
+					coeff = ''
+				is2ndMember = True
+			elif char.isalpha() or char == '':
+				eqData[char] = coeffToInt(coeff)
+				coeff = ''
+
+		if coeff:
+			coeff = coeffToInt(coeff)
+			eqData[''] += coeff
+
+		return self.fromCoeff(eqData)
+
+	def solve(self, found = {}):
+		unknown = None
+		value = 0
+		for letter in self:
+			if letter == '':
+				value = - self[letter]
+			elif letter in found:
+				value -= self[letter] * found[letter]
+			else:
+				if unknown is None:
+					unknown = letter
+				else:
+					raise Exception('More than one unknown')
+
+		if unknown is None:
+			return (value == 0)
+		else:
+			return { unknown: value / self[unknown] }
 
 	def __len__(self):
 		return len(self.data.keys())
@@ -117,48 +231,11 @@ class LinearEquation(Equation):
 
 		return LinearEquation(data)
 
+	def __neg__(self):
+		return self * (-1)
+
 	def __sub__(self, other):
-		return self + other*(-1)
-
-	@staticmethod
-	def fromStr(string):
-		eqData = { '': 0 }
-
-		coeff = ''
-		is2ndMember = False
-
-		def coeffToInt(coeff):
-			if coeff in ['+', '-']:
-				coeff += '1'
-
-			if coeff == '':
-				coeff = 1
-			else:
-				coeff = int(coeff)
-
-			if is2ndMember:
-				coeff = -coeff
-			return coeff
-
-		for char in string:
-			if char.isdigit():
-				coeff += char
-			elif char in ['+', '-']:
-				coeff = char
-			elif char == '=':
-				if coeff:
-					eqData[''] = coeffToInt(coeff)
-					coeff = ''
-				is2ndMember = True
-			elif char.isalpha() or char == '':
-				eqData[char] = coeffToInt(coeff)
-				coeff = ''
-
-		if coeff:
-			coeff = coeffToInt(coeff)
-			eqData[''] += coeff
-
-		return LinearEquation(eqData)
+		return self + (-other)
 
 print('Entrez le système :')
 
@@ -169,7 +246,7 @@ while True:
 	if not eqStr:
 		break
 	else:
-		eqs.append(LinearEquation.fromStr(eqStr))
+		eqs.append(LinearEquation(eqStr))
 
 sys = LinearSystem(eqs)
-print(str(sys.pivot()))
+print(str(sys.solve()))
