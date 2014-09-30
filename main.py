@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import copy
+
 class System:
 	pass
 
@@ -110,10 +112,83 @@ class Equation:
 	pass
 
 class LinearEquation(Equation):
-	def __init__(self, data):
+	def __init__(self, data = None):
+		if isinstance(data, str):
+			members = data.split('=')
+			firstMember = LinearExpression(members[0])
+
+			if len(members) > 1:
+				secondMember = LinearExpression(members[1])
+				self.expression = firstMember - secondMember
+			else:
+				self.expression = firstMember
+		else:
+			self.expression = LinearExpression(data)
+
+	def __str__(self):
+		return str(self.expression) + '= 0'
+
+	def __iter__(self):
+		return iter(self.expression)
+
+	def __getitem__(self, key):
+		return self.expression[key]
+
+	def __len__(self):
+		return len(self.expression)
+
+	def __mul__(self, factor):
+		return LinearEquation(self.expression * factor)
+
+	def __add__(self, other):
+		if isinstance(other, LinearEquation):
+			other = other.expression
+
+		return LinearEquation(self.expression + other)
+
+	def __neg__(self):
+		return self * (-1)
+
+	def __sub__(self, other):
+		return self + (-other)
+
+	def solve(self, found = {}):
+		primaryUnknown = None
+		secondaryUnknowns = {}
+		value = 0
+		for letter in self:
+			if letter == '':
+				value = - self[letter]
+			elif letter in found:
+				value = value - found[letter] * self[letter]
+			else:
+				if primaryUnknown is None:
+					primaryUnknown = letter
+				else:
+					secondaryUnknowns[letter] = - self[letter] / self[primaryUnknown]
+
+		if primaryUnknown is None:
+			return (value == 0)
+		elif len(secondaryUnknowns) == 0:
+			return { primaryUnknown: value / self[primaryUnknown] }
+		else:
+			# TODO: didnt managed to find a clean way to do this
+			# Even with the __div__ magic method
+			secondaryUnknowns[''] = value * (1 / self[primaryUnknown])
+			return { primaryUnknown: LinearExpression(secondaryUnknowns) }
+
+class Expression:
+	pass
+
+class LinearExpression(Expression):
+	def __init__(self, data = None):
 		self.data = {}
 
-		if isinstance(data, dict):
+		if isinstance(data, LinearExpression):
+			self.fromCoeff(data.data)
+		elif isinstance(data, int):
+			self.fromCoeff({ '': data })
+		elif isinstance(data, dict):
 			self.fromCoeff(data)
 		elif isinstance(data, str):
 			self.fromStr(data)
@@ -121,17 +196,25 @@ class LinearEquation(Equation):
 	def fromCoeff(self, data):
 		self.data = {}
 
+		addAfter = None
+		if '' in data and isinstance(data[''], LinearExpression):
+			addAfter = data['']
+			data[''] = 0
+
 		for letter in data:
 			coeff = data[letter]
 			if coeff == 0:
 				continue
-			self.data[letter] = coeff
+			else:
+				self.data[letter] = coeff
+
+		if addAfter:
+			self.data = (self + addAfter).data
 
 	def fromStr(self, string):
-		eqData = { '': 0 }
+		expData = { '': 0 }
 
 		coeff = ''
-		is2ndMember = False
 
 		def coeffToInt(coeff):
 			if coeff in ['+', '-']:
@@ -142,8 +225,6 @@ class LinearEquation(Equation):
 			else:
 				coeff = int(coeff)
 
-			if is2ndMember:
-				coeff = -coeff
 			return coeff
 
 		for char in string:
@@ -151,42 +232,15 @@ class LinearEquation(Equation):
 				coeff += char
 			elif char in ['+', '-']:
 				coeff = char
-			elif char == '=':
-				if coeff:
-					eqData[''] = coeffToInt(coeff)
-					coeff = ''
-				is2ndMember = True
 			elif char.isalpha() or char == '':
-				eqData[char] = coeffToInt(coeff)
+				expData[char] = coeffToInt(coeff)
 				coeff = ''
 
 		if coeff:
 			coeff = coeffToInt(coeff)
-			eqData[''] += coeff
+			expData[''] += coeff
 
-		return self.fromCoeff(eqData)
-
-	def solve(self, found = {}):
-		unknown = None
-		value = 0
-		for letter in self:
-			if letter == '':
-				value = - self[letter]
-			elif letter in found:
-				value -= self[letter] * found[letter]
-			else:
-				if unknown is None:
-					unknown = letter
-				else:
-					raise Exception('More than one unknown')
-
-		if unknown is None:
-			return (value == 0)
-		else:
-			return { unknown: value / self[unknown] }
-
-	def __len__(self):
-		return len(self.data.keys())
+		return self.fromCoeff(expData)
 
 	def __str__(self):
 		string = ''
@@ -199,7 +253,11 @@ class LinearEquation(Equation):
 			string += str(abs(coeff))+letter+' '
 
 		if not string: string = '0 '
-		return string + '= 0'
+
+		return string
+
+	def __repr__(self): # TODO: find a way to print solutions of a system without this
+		return str(self)
 
 	def __iter__(self):
 		return iter(self.data)
@@ -207,46 +265,70 @@ class LinearEquation(Equation):
 	def __getitem__(self, key):
 		return self.data[key]
 
-	def __mul__(self, factor):
-		data = {}
-		for letter in self:
-			data[letter] = self[letter] * factor
-		return LinearEquation(data)
+	def __setitem__(self, key, value):
+		self.data[key] = value
+
+	def __len__(self):
+		return len(self.data.keys())
 
 	def __add__(self, other):
-		data = {}
+		if not isinstance(other, Expression):
+			other = LinearExpression(other)
 
-		for letter in self:
-			coeff = self[letter]
-
-			if letter in other:
-				data[letter] = coeff + other[letter]
-
+		expData = copy.copy(self.data)
 		for letter in other:
-			coeff = other[letter]
+			if not letter in expData:
+				expData[letter] = 0
 
-			if letter in self: continue
+			expData[letter] += other[letter]
 
-			data[letter] = coeff
+		return LinearExpression(expData)
 
-		return LinearEquation(data)
+	def __radd__(self, other):
+		return self + other
 
-	def __neg__(self):
-		return self * (-1)
+	def __iadd__(self, other):
+		return self + other
 
 	def __sub__(self, other):
 		return self + (-other)
 
-print('Entrez le système :')
+	def __rsub__(self, other):
+		return self - other
 
-eqs = []
-while True:
-	eqStr = input()
+	def __isub__(self, other):
+		return self - other
 
-	if not eqStr:
-		break
-	else:
-		eqs.append(LinearEquation(eqStr))
+	def __mul__(self, other):
+		expData = {}
+		for letter in self:
+			expData[letter] = self[letter] * other
+		return LinearExpression(expData)
 
-sys = LinearSystem(eqs)
-print(str(sys.solve()))
+	def __rmul__(self, other):
+		return self * other
+
+	def __neg__(self):
+		return self * (-1)
+
+	def __div__(self, other):
+		return self * (1 / other)
+
+	def __rdiv__(self, other):
+		return (1 / self) * other
+
+
+if __name__ == '__main__':
+	print('Entrez le système :')
+
+	eqs = []
+	while True:
+		eqStr = input()
+
+		if not eqStr:
+			break
+		else:
+			eqs.append(LinearEquation(eqStr))
+
+	sys = LinearSystem(eqs)
+	print(sys.solve())
